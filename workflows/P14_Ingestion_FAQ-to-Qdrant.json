@@ -1,0 +1,325 @@
+{
+  "name": "Проект 14 — Ingestion: FAQ.pdf → Qdrant (skeleton)",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## INGESTION: Nordwaren FAQ → Qdrant\nЗапустить ОДИН РАЗ (и повторно при обновлении FAQ).\nПоток: читаем PDF → извлекаем текст → чанкинг (recursive) → embeddings → Qdrant insert.\n\nBest practice: если нужен максимум качества retrieval — конвертировать в Markdown до чанкинга (сохраняет структуру Q/A).\n\n⚠️ Каркас: при импорте проверить типы/версии langchain-нод под текущую версию n8n. Подставить путь к файлу, имя коллекции и креды Qdrant.\n\n❗Embeddings-модель ДОЛЖНА совпадать с моделью в основном (query) workflow — иначе поиск сломается.",
+        "height": 340,
+        "width": 440,
+        "color": 7
+      },
+      "id": "03a5228e-b6f5-4525-802d-a4513bdb0323",
+      "name": "LEGEND",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "80267006-fb8a-43cb-b43e-5561cd4595f8",
+      "name": "1a. Manual Trigger (файл с диска)",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        384
+      ]
+    },
+    {
+      "parameters": {
+        "formTitle": "Загрузка FAQ Nordwaren → Qdrant",
+        "formDescription": "Перетащите Nordwaren_FAQ_dostavka.pdf для индексации в базу знаний.",
+        "formFields": {
+          "values": [
+            {
+              "fieldLabel": "FAQ PDF",
+              "fieldType": "file",
+              "acceptFileTypes": ".pdf",
+              "requiredField": true
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "153a2da1-9a2e-4c8f-83fc-2932da13574d",
+      "name": "1b. Form Upload (перетащи PDF)",
+      "type": "n8n-nodes-base.formTrigger",
+      "typeVersion": 2.2,
+      "position": [
+        0,
+        624
+      ]
+    },
+    {
+      "parameters": {
+        "content": "### Два входа (выбери один)\n**1a. Manual Trigger** — читает файл с диска по пути (нода 2). Запуск кнопкой Execute.\n**1b. Form Upload** — открывает веб-форму, перетаскиваешь PDF в браузере. Идёт СРАЗУ в Extract (ноду 2 пропускает).\n\n⚠️ Для формы: в ноде «3. Extract from File» поставь `binaryPropertyName` = ключ бинарника формы (обычно имя поля, напр. `FAQ_PDF` или `field_0` — посмотри в выводе Form-ноды).",
+        "height": 210,
+        "width": 320,
+        "color": 6
+      },
+      "id": "072929e9-5fa0-4acd-b200-bc9efaa6fe1d",
+      "name": "note Inputs",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        0,
+        864
+      ]
+    },
+    {
+      "parameters": {
+        "content": "### Источник файла\nВариант A: локальный файл (Read/Write Files from Disk) — путь к `Nordwaren_FAQ_dostavka.pdf`.\nВариант B: Google Drive download / Form upload.\n[SWAP при желании]",
+        "height": 170,
+        "width": 300,
+        "color": 5
+      },
+      "id": "750518e8-0fb7-4c05-b2af-75cef6304e12",
+      "name": "note Source",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        240,
+        128
+      ]
+    },
+    {
+      "parameters": {
+        "fileSelector": "/data/Nordwaren_FAQ_dostavka.pdf",
+        "options": {}
+      },
+      "id": "63ae6ff7-9f50-480d-9ab9-0139d8404176",
+      "name": "2. Read File (PDF)",
+      "type": "n8n-nodes-base.readWriteFile",
+      "typeVersion": 1,
+      "position": [
+        240,
+        384
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "pdf",
+        "binaryPropertyName": "={{ Object.keys($binary)[0] }}",
+        "options": {}
+      },
+      "id": "f3ea06b4-40ea-4260-9923-1015134b2728",
+      "name": "3. Extract from File (PDF → text)",
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1,
+      "position": [
+        480,
+        384
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "insert",
+        "qdrantCollection": {
+          "__rl": true,
+          "mode": "id",
+          "value": "nordwaren_faq_local"
+        },
+        "options": {}
+      },
+      "id": "535ceed5-3aca-49f7-afb3-f3ec974c9884",
+      "name": "4. Qdrant Vector Store (INSERT, локально)",
+      "type": "@n8n/n8n-nodes-langchain.vectorStoreQdrant",
+      "typeVersion": 1.1,
+      "position": [
+        800,
+        384
+      ],
+      "credentials": {},
+      "notes": "Коллекция задана по ID, а не выбором из списка: её ещё не существует, выбирать не из чего.\nПри вставке нода создаёт коллекцию автоматически.\n❗ Имя должно совпадать с нодой 11a основного воркфлоу, и модель эмбеддингов тоже (сейчас обе — дефолтная OpenAI)."
+    },
+    {
+      "parameters": {
+        "content": "### Embeddings [SWAP→LOCAL]\nСейчас: OpenAI embeddings.\nСвап: локальная многоязычная модель (класс bge-m3 / multilingual-e5) через свой endpoint.\n❗ТА ЖЕ модель в query-workflow.",
+        "height": 170,
+        "width": 300,
+        "color": 5
+      },
+      "id": "af5b651e-30b3-4006-a68f-bd4222cf59dd",
+      "name": "note Embeddings",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        768,
+        624
+      ]
+    },
+    {
+      "parameters": {
+        "model": "text-embedding-bge-m3",
+        "options": {
+          "batchSize": 8,
+          "encodingFormat": "float"
+        }
+      },
+      "id": "f696c519-8e73-4582-a60a-7f2156917d2c",
+      "name": "Embeddings (LM Studio, локально)",
+      "type": "@n8n/n8n-nodes-langchain.embeddingsOpenAi",
+      "typeVersion": 1.2,
+      "position": [
+        800,
+        800
+      ],
+      "credentials": {},
+      "notes": "Модель сменена на bge-m3 (14.08.2026) — по замерам, а не по ощущениям.\nnomic-embed-text-v1.5 не тянет кросс-язычный поиск: на немецкий вопрос по русскому\nсправочнику он ставил ПОСТОРОННИЙ фрагмент ВЫШЕ нужного (отрыв −0.011),\nа на украинском держался на грани (+0.016). У bge-m3 отрыв +0.23…+0.35 на всех трёх языках.\n\nРазмерность стала 1024 (было 768) — коллекцию обязательно пересоздавать,\nстарые векторы несовместимы.\n\n❗ Encoding Format = Float снимать НЕЛЬЗЯ: без этого клиент просит base64,\nLM Studio его игнорирует, и в базу молча уходят НУЛЕВЫЕ векторы вчетверо меньшей\nразмерности (768⇒192). Ошибки при этом нет, прогон зелёный."
+    },
+    {
+      "parameters": {
+        "jsonMode": "expressionData",
+        "jsonData": "={{ $json.text }}",
+        "textSplittingMode": "custom",
+        "options": {
+          "metadata": {
+            "metadataValues": [
+              {
+                "name": "source",
+                "value": "Nordwaren_FAQ_dostavka.pdf"
+              },
+              {
+                "name": "category",
+                "value": "={{ $json.category || 'faq' }}"
+              }
+            ]
+          }
+        }
+      },
+      "id": "80c6e778-31f2-4c29-8429-51537d8af5cd",
+      "name": "Default Data Loader",
+      "type": "@n8n/n8n-nodes-langchain.documentDefaultDataLoader",
+      "typeVersion": 1.1,
+      "position": [
+        1040,
+        624
+      ]
+    },
+    {
+      "parameters": {
+        "content": "### Chunking\nRecursive Character Text Splitter (рекоменд.). chunkSize ~500–800, overlap ~80–100 — откалибровать под короткие Q/A блоки FAQ.",
+        "height": 150,
+        "width": 300,
+        "color": 4
+      },
+      "id": "381cf84d-7528-4f2f-b109-cafba361302c",
+      "name": "note Splitter",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1248,
+        800
+      ]
+    },
+    {
+      "parameters": {
+        "chunkSize": 700,
+        "chunkOverlap": 90,
+        "options": {}
+      },
+      "id": "8ff524d9-faa3-406f-b697-c05d4b7558f3",
+      "name": "Recursive Character Text Splitter",
+      "type": "@n8n/n8n-nodes-langchain.textSplitterRecursiveCharacterTextSplitter",
+      "typeVersion": 1,
+      "position": [
+        1280,
+        624
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "1a. Manual Trigger (файл с диска)": {
+      "main": [
+        [
+          {
+            "node": "2. Read File (PDF)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "1b. Form Upload (перетащи PDF)": {
+      "main": [
+        [
+          {
+            "node": "3. Extract from File (PDF → text)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "2. Read File (PDF)": {
+      "main": [
+        [
+          {
+            "node": "3. Extract from File (PDF → text)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "3. Extract from File (PDF → text)": {
+      "main": [
+        [
+          {
+            "node": "4. Qdrant Vector Store (INSERT, локально)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Embeddings (LM Studio, локально)": {
+      "ai_embedding": [
+        [
+          {
+            "node": "4. Qdrant Vector Store (INSERT, локально)",
+            "type": "ai_embedding",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Default Data Loader": {
+      "ai_document": [
+        [
+          {
+            "node": "4. Qdrant Vector Store (INSERT, локально)",
+            "type": "ai_document",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Recursive Character Text Splitter": {
+      "ai_textSplitter": [
+        [
+          {
+            "node": "Default Data Loader",
+            "type": "ai_textSplitter",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "nodeGroups": [],
+  "staticData": null
+}

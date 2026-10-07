@@ -1,0 +1,322 @@
+{
+  "name": "Проект 14 — Сторож локального стека (health + сбои → Telegram)",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 10
+            }
+          ]
+        }
+      },
+      "id": "sched-1",
+      "name": "1. Расписание — каждые 10 минут",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        208
+      ],
+      "notes": "Проверка по расписанию нужна потому, что сбой надо заметить ДО того, как придёт клиент.\nQdrant умер ночью 13.08 и пролежал до утра — узнали об этом только по ложным ответам бота."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "c-alert",
+              "leftValue": "={{ $json.alert }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-1",
+      "name": "3. IF что-то лежит?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        480,
+        208
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "err-1",
+      "name": "4. Сбой основного воркфлоу (Error Trigger)",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        528
+      ],
+      "notes": "Срабатывает, когда основной воркфлоу падает целиком — именно тот случай,\nкогда клиент не получает НИЧЕГО (прогон 980: LM Studio недоступен → упали и классификатор,\nи нода ответа; озвучивать было нечего).\nПодключается не связью, а настройкой Error Workflow у основного воркфлоу."
+    },
+    {
+      "parameters": {
+        "jsCode": "// Собираем человеческое сообщение из того, что отдаёт Error Trigger.\n// Читать его будет человек в Telegram, а не машина — поэтому без JSON и стеков.\nconst j = $input.first().json || {};\nconst wf = (j.workflow && j.workflow.name) || 'неизвестный воркфлоу';\nconst ex = j.execution || {};\nconst err = ex.error || j.error || {};\n\nconst node = err.node && err.node.name ? err.node.name : '—';\nconst msg = String(err.message || 'без описания').slice(0, 300);\nconst url = ex.url || '';\nconst ts = new Date().toISOString().slice(0, 16).replace('T', ' ');\n\nconst text = `\\u{1F534} Nordwaren VoiceDesk — сбой, клиент остался без ответа\\n${ts}\\n\\nВоркфлоу: ${wf}\\nУпало на ноде: ${node}\\nПричина: ${msg}` +\n  (url ? `\\n\\nПрогон: ${url}` : '') +\n  `\\n\\nЧаще всего это значит, что Mac выключен/уснул или LM Studio не поднят.`;\n\nreturn [{ json: { text }, pairedItem: { item: 0 } }];"
+      },
+      "id": "errtext-1",
+      "name": "5. Текст тревоги о сбое",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        528
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "YOUR_CHAT_ID",
+        "text": "={{ $json.text }}",
+        "additionalFields": {}
+      },
+      "id": "tg-1",
+      "name": "6. Предупреждение оператору (Telegram)",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        720,
+        368
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "credentials": {},
+      "notes": "Единая точка оповещения: сюда сходятся и плановая проверка, и сбой воркфлоу.\nchat_id YOUR_CHAT_ID — чат Dennis (согласовано). Для боевого внедрения — канал поддержки.\nРетраи включены: сообщение о сбое не должно теряться из-за сетевой икоты."
+    },
+    {
+      "parameters": {
+        "content": "## Сторож локального стека\n\nДва независимых повода позвать человека:\n\n**Сверху — плановая проверка (каждые 10 минут).** Ловит тихую смерть сервиса ДО того, как придёт клиент.\nПовод: Qdrant умер за ночь 13.08 и пролежал до утра — бот отвечал «у нас нет такой информации» на вопрос, ответ на который в справочнике ЕСТЬ.\n\n**Снизу — сбой самого воркфлоу.** Когда граф падает целиком, клиент не получает ничего — и без этой ветки об этом никто не узнает.\nВключается настройкой **Error Workflow** у основного воркфлоу, а не связью на холсте.",
+        "height": 200,
+        "width": 900
+      },
+      "id": "note-1",
+      "name": "Пояснение",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -48,
+        -64
+      ]
+    },
+    {
+      "parameters": {
+        "url": "http://YOUR_LOCAL_HOST:8088/health",
+        "options": {
+          "timeout": 8000
+        }
+      },
+      "id": "204cabed-3292-4d8b-b64d-684072615cae",
+      "name": "2a. Проверка — голос",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        208,
+        208
+      ],
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput",
+      "notes": "Отвечает 200 даже когда распознавание лежит, поэтому вердикт смотрит на поле whisper."
+    },
+    {
+      "parameters": {
+        "url": "http://YOUR_LOCAL_HOST:6333/healthz",
+        "options": {
+          "timeout": 8000
+        }
+      },
+      "id": "683eb5da-ba9c-4e2d-ba0f-5850809ce461",
+      "name": "2b. Проверка — Qdrant",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        400,
+        208
+      ],
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput",
+      "notes": "/healthz отвечает без API-ключа — секретов в стороже нет."
+    },
+    {
+      "parameters": {
+        "url": "http://YOUR_LOCAL_HOST:1234/v1/models",
+        "options": {
+          "timeout": 8000
+        }
+      },
+      "id": "ba05bf27-0f9f-4b86-8ceb-ee99f6ee56fa",
+      "name": "2c. Проверка — LM Studio",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        608,
+        208
+      ],
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Три проверки → один вердикт.\n// Проверки сделаны отдельными HTTP-нодами, а не кодом: в Code-ноде этого n8n\n// $helpers НЕДОСТУПЕН («is not defined», прогон 987) — и все три вызова падали в catch,\n// а сторож рапортовал «лежат все три», хотя лежал один.\n// Ложная тревога хуже отсутствия тревоги: на неё перестают реагировать.\n\nconst probe = (label, node, check) => {\n  let j;\n  try { j = $(node).first().json; } catch (e) { return `${label}: проверка не выполнилась`; }\n  if (!j || j.error !== undefined) return `${label}: не отвечает`;\n  const why = check ? check(j) : null;\n  return why ? `${label}: ${why}` : null;\n};\n\nconst down = [\n  probe('Голос (Piper + whisper)', '2a. Проверка — голос',\n    (j) => (j.whisper && j.whisper !== 'ok') ? 'синтез жив, РАСПОЗНАВАНИЕ не отвечает' : null),\n  probe('Векторная база Qdrant', '2b. Проверка — Qdrant'),\n  probe('Модель LM Studio', '2c. Проверка — LM Studio'),\n  probe('Postgres (каталог/журнал)', '2e. Проверка — Postgres'),\n].filter(Boolean);\n\nconst ts = new Date().toISOString().slice(0, 16).replace('T', ' ');\n\n// Дедупликация (запрос Dennis 15.08): без неё сторож шлёт одно и то же предупреждение каждые\n// 10 минут, пока проблема не устранена — от повторов перестают реагировать. Алерт\n// теперь только на СМЕНУ набора сломанных сервисов (новая поломка, изменился состав сломанного,\n// или всё отлегло) — не на каждом тике. Состояние — в staticData, переживает тики, не переживает перезапуск n8n.\nconst store = $getWorkflowStaticData('global');\nconst prevDown = store.watchdogPrevDown || [];\nconst downKey = down.slice().sort().join('|');\nconst prevKey = prevDown.slice().sort().join('|');\nconst changed = downKey !== prevKey;\nstore.watchdogPrevDown = down;\n\nconst shouldAlert = down.length > 0 && changed;\n\nconst text = shouldAlert\n  ? `⚠️ Nordwaren VoiceDesk — локальный стек неисправен\\n${ts}\\n\\nНе отвечают:\\n• ${down.join('\\n• ')}\\n\\nАссистент сейчас либо молчит, либо отвечает клиентам неверно.\\nПроверьте: включён ли Mac, есть ли Tailscale, поднят ли LM Studio.\\n\\n(Повторно не напомним, пока состав неисправностей не изменится.)`\n  : '';\n\nreturn [{ json: { alert: shouldAlert, down, text }, pairedItem: { item: 0 } }];"
+      },
+      "id": "0f6d8890-2034-409e-ab31-b54ae58c5935",
+      "name": "2d. Свести результат",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        800,
+        208
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT 1 AS ok;",
+        "options": {}
+      },
+      "id": "pg-check",
+      "name": "2e. Проверка — Postgres",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        704,
+        208
+      ],
+      "alwaysOutputData": true,
+      "credentials": {},
+      "onError": "continueRegularOutput",
+      "notes": "Этап C4: каталог и журнал теперь в Postgres — его падение так же критично, как и падение Qdrant/LM Studio."
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "3. IF что-то лежит?": {
+      "main": [
+        [
+          {
+            "node": "6. Предупреждение оператору (Telegram)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "4. Сбой основного воркфлоу (Error Trigger)": {
+      "main": [
+        [
+          {
+            "node": "5. Текст тревоги о сбое",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "5. Текст тревоги о сбое": {
+      "main": [
+        [
+          {
+            "node": "6. Предупреждение оператору (Telegram)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "1. Расписание — каждые 10 минут": {
+      "main": [
+        [
+          {
+            "node": "2a. Проверка — голос",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "2a. Проверка — голос": {
+      "main": [
+        [
+          {
+            "node": "2b. Проверка — Qdrant",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "2b. Проверка — Qdrant": {
+      "main": [
+        [
+          {
+            "node": "2c. Проверка — LM Studio",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "2d. Свести результат": {
+      "main": [
+        [
+          {
+            "node": "3. IF что-то лежит?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "2c. Проверка — LM Studio": {
+      "main": [
+        [
+          {
+            "node": "2e. Проверка — Postgres",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "2e. Проверка — Postgres": {
+      "main": [
+        [
+          {
+            "node": "2d. Свести результат",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "saveManualExecutions": true,
+    "saveExecutionProgress": true
+  },
+  "meta": {},
+  "nodeGroups": [],
+  "staticData": null
+}
